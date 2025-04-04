@@ -1,6 +1,5 @@
 const express = require("express");
 const multer = require("multer");
-const cors = require("cors");
 const ffmpeg = require("fluent-ffmpeg");
 const fs = require("fs");
 const path = require("path");
@@ -8,80 +7,92 @@ const path = require("path");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
 app.use(express.static("public"));
-app.use("/hls-playback", express.static("hls-playback"));
+app.use(express.json());
 
-const storage = multer.diskStorage({
-  destination: "uploads",
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
+// Setup multer for full upload speed (writes to disk directly)
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: "uploads/",
+    filename: (req, file, cb) => {
+      cb(null, Date.now() + path.extname(file.originalname));
+    },
+  }),
+  limits: { fileSize: 1024 * 1024 * 1024 }, // 1 GB max
 });
-const upload = multer({ storage });
 
-app.post("/convert", upload.single("video"), async (req, res) => {
-  const timestamp = Date.now().toString();
-  const folder = `hls-playback/${timestamp}`;
-  const filepath = req.file.path;
+// Route: Upload MP4
+app.post("/upload", upload.single("video"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No video uploaded" });
 
-  fs.mkdirSync(folder, { recursive: true });
+  res.json({ filename: req.file.filename });
+});
 
-  const resolutions = [
-    { name: "480p", width: 854, height: 480, bitrate: "800k" },
-    { name: "720p", width: 1280, height: 720, bitrate: "1500k" },
-    { name: "1080p", width: 1920, height: 1080, bitrate: "3000k" }
+// Route: Convert MP4 to HLS
+app.post("/convert", async (req, res) => {
+  const { filename } = req.body;
+  if (!filename) return res.status(400).json({ error: "Missing filename" });
+
+  const inputPath = path.join(__dirname, "uploads", filename);
+  const folderId = `${Date.now()}`;
+  const outputDir = path.join(__dirname, "hls-playback", folderId);
+
+  fs.mkdirSync(outputDir, { recursive: true });
+
+  const variants = [
+    { resolution: "854x480", bitrate: 800, name: "480p" },
+    { resolution: "1280x720", bitrate: 1400, name: "720p" },
+    { resolution: "1920x1080", bitrate: 3000, name: "1080p" },
   ];
 
-  const variants = [];
+  let completed = 0;
 
-  const convertOne = (resObj) => {
-    return new Promise((resolve, reject) => {
-      const outputName = `${resObj.name}.m3u8`;
-      const outputPath = `${folder}/${outputName}`;
+  variants.forEach((variant) => {
+    const outputPath = path.join(outputDir, `${variant.name}.m3u8`);
+    const segmentPath = `${outputDir}/${variant.name}_%03d.ts`;
 
-      ffmpeg(filepath)
-        .outputOptions([
-          "-preset veryfast",
-          "-g 48",
-          "-sc_threshold 0",
-          `-b:v ${resObj.bitrate}`,
-          "-maxrate " + resObj.bitrate,
-          "-bufsize 1000k",
-          "-hls_time 10",
-          "-hls_list_size 0",
-          "-hls_segment_filename", `${folder}/${resObj.name}_%03d.ts`
-        ])
-        .size(`${resObj.width}x${resObj.height}`)
-        .output(outputPath)
-        .on("end", () => {
-          console.log(`${resObj.name} done`);
-          variants.push({
-            resolution: resObj,
-            path: outputName,
-            bandwidth: parseInt(resObj.bitrate),
+    ffmpeg(inputPath)
+      .outputOptions([
+        `-vf scale=${variant.resolution}`,
+        `-c:v libx264`,
+        `-b:v ${variant.bitrate}k`,
+        `-c:a aac`,
+        `-hls_time 10`,
+        `-hls_playlist_type vod`,
+        `-hls_segment_filename ${segmentPath}`,
+      ])
+      .output(outputPath)
+      .on("end", () => {
+        completed++;
+        if (completed === variants.length) {
+          const masterContent = variants
+            .map(
+              (v) =>
+                `#EXT-X-STREAM-INF:BANDWIDTH=${v.bitrate * 1000},RESOLUTION=${v.resolution}\n${v.name}.m3u8`
+            )
+            .join("\n");
+
+          const masterPath = path.join(outputDir, "master.m3u8");
+          fs.writeFileSync(masterPath, "#EXTM3U\n" + masterContent);
+
+          res.json({
+            message: "Conversion complete",
+            m3u8: `/hls-playback/${folderId}/master.m3u8`,
           });
-          resolve();
-        })
-        .on("error", reject)
-        .run();
-    });
-  };
-
-  for (let resObj of resolutions) {
-    await convertOne(resObj);
-  }
-
-  const masterPlaylist = variants.map(v => {
-    return `#EXT-X-STREAM-INF:BANDWIDTH=${v.bandwidth},RESOLUTION=${v.resolution.width}x${v.resolution.height}\n${v.path}`;
-  }).join("\n");
-
-  fs.writeFileSync(`${folder}/master.m3u8`, "#EXTM3U\n" + masterPlaylist);
-
-  const m3u8Url = `/hls-playback/${timestamp}/master.m3u8`;
-  console.log("Your m3u8 URL:", m3u8Url);
-  res.json({ url: m3u8Url });
+        }
+      })
+      .on("error", (err) => {
+        console.error("FFmpeg error:", err);
+        res.status(500).json({ error: "FFmpeg conversion failed" });
+      })
+      .run();
+  });
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-              
+// Serve the HLS content
+app.use("/hls-playback", express.static(path.join(__dirname, "hls-playback")));
+
+app.listen(PORT, () => {
+  console.log(`Server running at http://localhost:${PORT}`);
+});
+     
