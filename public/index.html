@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>M3U8 to MP4 Downloader</title>
+  <style>
+    body { font-family: sans-serif; padding: 2rem; background: #111; color: #fff; }
+    input, button { padding: 0.5rem; margin-top: 1rem; width: 100%; }
+    button { background: #28a745; color: white; border: none; cursor: pointer; }
+    button:hover { background: #218838; }
+  </style>
+</head>
+<body>
+  <h1>M3U8 to MP4</h1>
+  <input type="text" id="url" placeholder="Enter M3U8 URL..." />
+  <button onclick="download()">Convert & Download</button>
+  <p id="status"></p>
+
+  <script>
+    async function download() {
+      const url = document.getElementById("url").value;
+      const status = document.getElementById("status");
+      status.textContent = "Processing...";
+      try {
+        const res = await fetch("/convert", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url })
+        });
+        const data = await res.json();
+        if (data.url) {
+          status.innerHTML = `Done! <a href="${data.url}" download>Click to download</a>`;
+        } else {
+          status.textContent = "Error: Conversion failed.";
+        }
+      } catch (err) {
+        status.textContent = "Error: Something went wrong.";
+        console.error(err);
+      }
+    }
+  </script>
+</body>
+</html>
