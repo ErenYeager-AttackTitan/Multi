@@ -44,37 +44,49 @@
       color: #4caf50;
       text-decoration: none;
     }
+    button {
+      margin: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: #4caf50;
+      border: none;
+      color: #fff;
+      cursor: pointer;
+      border-radius: 5px;
+    }
   </style>
 </head>
 <body>
   <div class="box">
-    <h1>Upload MP4 to Convert to HLS (m3u8)</h1>
+    <h1>Upload MP4 → Convert to HLS</h1>
     <input type="file" id="videoInput" accept="video/mp4"/>
-    <button onclick="uploadVideo()">Convert</button>
+    <button onclick="uploadVideo()">Upload</button>
+    <button onclick="convertVideo()" disabled id="convertBtn">Convert</button>
+
     <div class="progress-bar"><div class="progress" id="progress"></div></div>
     <p id="status"></p>
     <div id="link"></div>
   </div>
 
   <script>
+    let uploadedFilename = null;
+
     function uploadVideo() {
       const fileInput = document.getElementById("videoInput");
       const status = document.getElementById("status");
       const progressBar = document.getElementById("progress");
-      const link = document.getElementById("link");
+      const convertBtn = document.getElementById("convertBtn");
       const file = fileInput.files[0];
 
-      if (!file) return alert("Please select an MP4 file first.");
-
-      status.innerText = "Uploading and converting...";
-      progressBar.style.width = "10%";
-      link.innerHTML = "";
+      if (!file) return alert("Select an MP4 file first.");
 
       const formData = new FormData();
       formData.append("video", file);
 
+      status.innerText = "Uploading...";
+      progressBar.style.width = "10%";
+
       const xhr = new XMLHttpRequest();
-      xhr.open("POST", "/convert", true);
+      xhr.open("POST", "/upload", true);
 
       xhr.upload.onprogress = function (e) {
         if (e.lengthComputable) {
@@ -85,18 +97,46 @@
 
       xhr.onload = () => {
         const res = JSON.parse(xhr.responseText);
-        const fullURL = `${window.location.origin}${res.url}`;
-        status.innerText = "Conversion complete!";
+        uploadedFilename = res.filename;
+        status.innerText = "Upload complete. Now click Convert.";
         progressBar.style.width = "100%";
-        link.innerHTML = `M3U8 URL: <a href="${fullURL}" target="_blank">${fullURL}</a>`;
+        convertBtn.disabled = false;
       };
 
       xhr.onerror = () => {
-        status.innerText = "An error occurred.";
+        status.innerText = "Upload error.";
         progressBar.style.width = "0%";
       };
 
       xhr.send(formData);
+    }
+
+    function convertVideo() {
+      const status = document.getElementById("status");
+      const link = document.getElementById("link");
+      const progressBar = document.getElementById("progress");
+
+      if (!uploadedFilename) return alert("No uploaded file found.");
+
+      status.innerText = "Converting to M3U8...";
+      progressBar.style.width = "20%";
+
+      fetch("/convert", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: uploadedFilename })
+      })
+      .then(res => res.json())
+      .then(data => {
+        const fullURL = `${window.location.origin}${data.url}`;
+        status.innerText = "Conversion complete!";
+        progressBar.style.width = "100%";
+        link.innerHTML = `M3U8 URL: <a href="${fullURL}" target="_blank">${fullURL}</a>`;
+      })
+      .catch(() => {
+        status.innerText = "Conversion failed.";
+        progressBar.style.width = "0%";
+      });
     }
   </script>
 </body>
