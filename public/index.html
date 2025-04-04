@@ -28,12 +28,17 @@
     .hidden {
       display: none;
     }
-    video {
-      margin-top: 2rem;
-      max-width: 100%;
-    }
     button {
       margin-top: 1rem;
+    }
+    input.link-box {
+      background: #222;
+      color: #0f0;
+      border: none;
+      padding: 10px;
+      width: 100%;
+      margin-top: 1rem;
+      font-family: monospace;
     }
   </style>
 </head>
@@ -58,13 +63,9 @@
   </div>
 
   <div id="result" class="hidden">
-    <h3>HLS Stream:</h3>
-    <a id="m3u8-link" href="#" target="_blank">Play Master.m3u8</a>
-
-    <video controls id="video-player">
-      <source id="video-src" type="application/x-mpegURL" />
-      Your browser doesn't support HTML5 video.
-    </video>
+    <h3>HLS Master Playlist URL:</h3>
+    <input id="m3u8-link" class="link-box" readonly />
+    <button onclick="copyLink()">Copy Link</button>
   </div>
 
   <script>
@@ -75,9 +76,7 @@
     const convertBtn = document.getElementById("convert-btn");
     const convertStatus = document.getElementById("convert-status");
     const result = document.getElementById("result");
-    const link = document.getElementById("m3u8-link");
-    const videoSrc = document.getElementById("video-src");
-    const videoPlayer = document.getElementById("video-player");
+    const linkInput = document.getElementById("m3u8-link");
 
     let uploadedFilename = "";
 
@@ -130,11 +129,14 @@
       convertStatus.classList.add("hidden");
       result.classList.remove("hidden");
 
-      link.href = data.m3u8;
-      link.textContent = data.m3u8;
-      videoSrc.src = data.m3u8;
-      videoPlayer.load();
+      linkInput.value = location.origin + "/" + data.m3u8;
     });
+
+    function copyLink() {
+      linkInput.select();
+      document.execCommand("copy");
+      alert("Link copied to clipboard!");
+    }
   </script>
 </body>
 </html>
