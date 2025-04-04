@@ -2,42 +2,53 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>M3U8 to MP4 Downloader</title>
+  <title>MP4 to HLS Converter</title>
   <style>
-    body { font-family: sans-serif; padding: 2rem; background: #111; color: #fff; }
-    input, button { padding: 0.5rem; margin-top: 1rem; width: 100%; }
-    button { background: #28a745; color: white; border: none; cursor: pointer; }
-    button:hover { background: #218838; }
+    body { font-family: sans-serif; padding: 2rem; }
+    #progress { margin-top: 10px; width: 100%; background: #ccc; height: 10px; position: relative; }
+    #bar { height: 10px; width: 0%; background: green; transition: width 0.3s; }
   </style>
 </head>
 <body>
-  <h1>M3U8 to MP4</h1>
-  <input type="text" id="url" placeholder="Enter M3U8 URL..." />
-  <button onclick="download()">Convert & Download</button>
+  <h2>Upload MP4 to convert to Adaptive HLS</h2>
+  <form id="uploadForm">
+    <input type="file" name="video" accept="video/mp4" required /><br><br>
+    <button type="submit">Upload & Convert</button>
+  </form>
+  <div id="progress"><div id="bar"></div></div>
   <p id="status"></p>
+  <p id="link"></p>
 
   <script>
-    async function download() {
-      const url = document.getElementById("url").value;
-      const status = document.getElementById("status");
-      status.textContent = "Processing...";
-      try {
-        const res = await fetch("/convert", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url })
-        });
-        const data = await res.json();
-        if (data.url) {
-          status.innerHTML = `Done! <a href="${data.url}" download>Click to download</a>`;
-        } else {
-          status.textContent = "Error: Conversion failed.";
-        }
-      } catch (err) {
-        status.textContent = "Error: Something went wrong.";
-        console.error(err);
-      }
-    }
+    const form = document.getElementById("uploadForm");
+    const bar = document.getElementById("bar");
+    const status = document.getElementById("status");
+    const link = document.getElementById("link");
+
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const data = new FormData(form);
+      const xhr = new XMLHttpRequest();
+
+      xhr.open("POST", "/convert", true);
+      xhr.upload.onprogress = (e) => {
+        const percent = (e.loaded / e.total) * 100;
+        bar.style.width = percent + "%";
+        status.innerText = `Uploading: ${Math.round(percent)}%`;
+      };
+
+      xhr.onload = () => {
+        const res = JSON.parse(xhr.responseText);
+        status.innerText = "Conversion complete!";
+        link.innerHTML = `M3U8 URL: <a href="${res.url}" target="_blank">${res.url}</a>`;
+      };
+
+      xhr.onerror = () => {
+        status.innerText = "Upload failed.";
+      };
+
+      xhr.send(data);
+    };
   </script>
 </body>
 </html>
