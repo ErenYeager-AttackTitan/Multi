@@ -2,53 +2,102 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>MP4 to HLS Converter</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MP4 to M3U8 Converter</title>
   <style>
-    body { font-family: sans-serif; padding: 2rem; }
-    #progress { margin-top: 10px; width: 100%; background: #ccc; height: 10px; position: relative; }
-    #bar { height: 10px; width: 0%; background: green; transition: width 0.3s; }
+    body {
+      font-family: sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      background: #111;
+      color: #fff;
+    }
+    .box {
+      background: #222;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 0 10px #444;
+      text-align: center;
+    }
+    input[type="file"] {
+      margin-bottom: 1rem;
+      color: white;
+    }
+    .progress-bar {
+      width: 100%;
+      background: #444;
+      height: 20px;
+      border-radius: 10px;
+      margin-top: 1rem;
+      overflow: hidden;
+    }
+    .progress {
+      height: 100%;
+      width: 0;
+      background: #4caf50;
+      transition: width 0.3s;
+    }
+    #link a {
+      color: #4caf50;
+      text-decoration: none;
+    }
   </style>
 </head>
 <body>
-  <h2>Upload MP4 to convert to Adaptive HLS</h2>
-  <form id="uploadForm">
-    <input type="file" name="video" accept="video/mp4" required /><br><br>
-    <button type="submit">Upload & Convert</button>
-  </form>
-  <div id="progress"><div id="bar"></div></div>
-  <p id="status"></p>
-  <p id="link"></p>
+  <div class="box">
+    <h1>Upload MP4 to Convert to HLS (m3u8)</h1>
+    <input type="file" id="videoInput" accept="video/mp4"/>
+    <button onclick="uploadVideo()">Convert</button>
+    <div class="progress-bar"><div class="progress" id="progress"></div></div>
+    <p id="status"></p>
+    <div id="link"></div>
+  </div>
 
   <script>
-    const form = document.getElementById("uploadForm");
-    const bar = document.getElementById("bar");
-    const status = document.getElementById("status");
-    const link = document.getElementById("link");
+    function uploadVideo() {
+      const fileInput = document.getElementById("videoInput");
+      const status = document.getElementById("status");
+      const progressBar = document.getElementById("progress");
+      const link = document.getElementById("link");
+      const file = fileInput.files[0];
 
-    form.onsubmit = async (e) => {
-      e.preventDefault();
-      const data = new FormData(form);
+      if (!file) return alert("Please select an MP4 file first.");
+
+      status.innerText = "Uploading and converting...";
+      progressBar.style.width = "10%";
+      link.innerHTML = "";
+
+      const formData = new FormData();
+      formData.append("video", file);
+
       const xhr = new XMLHttpRequest();
-
       xhr.open("POST", "/convert", true);
-      xhr.upload.onprogress = (e) => {
-        const percent = (e.loaded / e.total) * 100;
-        bar.style.width = percent + "%";
-        status.innerText = `Uploading: ${Math.round(percent)}%`;
+
+      xhr.upload.onprogress = function (e) {
+        if (e.lengthComputable) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          progressBar.style.width = percent + "%";
+        }
       };
 
       xhr.onload = () => {
         const res = JSON.parse(xhr.responseText);
+        const fullURL = `${window.location.origin}${res.url}`;
         status.innerText = "Conversion complete!";
-        link.innerHTML = `M3U8 URL: <a href="${res.url}" target="_blank">${res.url}</a>`;
+        progressBar.style.width = "100%";
+        link.innerHTML = `M3U8 URL: <a href="${fullURL}" target="_blank">${fullURL}</a>`;
       };
 
       xhr.onerror = () => {
-        status.innerText = "Upload failed.";
+        status.innerText = "An error occurred.";
+        progressBar.style.width = "0%";
       };
 
-      xhr.send(data);
-    };
+      xhr.send(formData);
+    }
   </script>
 </body>
 </html>
