@@ -4,83 +4,80 @@ const cors = require("cors");
 const ffmpeg = require("fluent-ffmpeg");
 const fs = require("fs");
 const path = require("path");
-const axios = require("axios");
+const multer = require("multer");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, "public");
+const UPLOAD_DIR = path.join(__dirname, "uploads");
+const HLS_DIR = path.join(__dirname, "hls-playback");
+
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
+if (!fs.existsSync(HLS_DIR)) fs.mkdirSync(HLS_DIR);
+
+const storage = multer.diskStorage({
+  destination: UPLOAD_DIR,
+  filename: (req, file, cb) => cb(null, `video-${Date.now()}.mp4`)
+});
+const upload = multer({ storage });
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(PUBLIC_DIR));
+app.use("/hls-playback", express.static(HLS_DIR));
 
-// Clean old files
-fs.readdir(PUBLIC_DIR, (err, files) => {
-  if (err) return;
-  files.forEach((file) => {
-    const filePath = path.join(PUBLIC_DIR, file);
-    fs.stat(filePath, (err, stats) => {
-      if (err) return;
-      if (Date.now() - stats.mtimeMs > 15 * 60 * 1000) {
-        fs.unlink(filePath, () => console.log(`Deleted old file: ${file}`));
-      }
-    });
+app.post("/convert", upload.single("video"), async (req, res) => {
+  const inputPath = req.file.path;
+  const folderName = Date.now().toString();
+  const outputDir = path.join(HLS_DIR, folderName);
+  fs.mkdirSync(outputDir);
+
+  const resolutions = [
+    { name: "480p", size: "854x480", bitrate: "800k" },
+    { name: "720p", size: "1280x720", bitrate: "1400k" },
+    { name: "1080p", size: "1920x1080", bitrate: "3000k" },
+  ];
+
+  const m3u8s = [];
+
+  const convertStream = (res) => new Promise((resolve, reject) => {
+    const outPath = path.join(outputDir, `${res.name}.m3u8`);
+    m3u8s.push({ path: `${res.name}.m3u8`, resolution: res.size, bandwidth: res.bitrate });
+
+    ffmpeg(inputPath)
+      .videoBitrate(res.bitrate)
+      .size(res.size)
+      .outputOptions([
+        "-profile:v main",
+        "-crf 20",
+        "-sc_threshold 0",
+        "-g 48",
+        "-keyint_min 48",
+        "-hls_time 10",
+        "-hls_playlist_type vod",
+        `-hls_segment_filename ${outputDir}/${res.name}_%03d.ts`
+      ])
+      .output(outPath)
+      .on("end", resolve)
+      .on("error", reject)
+      .run();
   });
-});
-
-async function getHighestQualityM3U8(masterUrl) {
-  const res = await axios.get(masterUrl);
-  const lines = res.data.split("#EXT-X-STREAM-INF");
-  const variants = lines.slice(1).map(block => {
-    const match = block.match(/BANDWIDTH=(\d+).*?\n(.*)/);
-    return match ? { bandwidth: parseInt(match[1]), url: match[2].trim() } : null;
-  }).filter(Boolean);
-  variants.sort((a, b) => b.bandwidth - a.bandwidth);
-  const baseUrl = new URL(masterUrl);
-  return new URL(variants[0].url, baseUrl).href;
-}
-
-app.post("/convert", async (req, res) => {
-  const { url } = req.body;
-  if (!url) return res.status(400).json({ error: "No M3U8 URL provided" });
 
   try {
-    let finalUrl = url;
-    const response = await axios.get(url);
-    if (response.data.includes("#EXT-X-STREAM-INF")) {
-      finalUrl = await getHighestQualityM3U8(url);
+    for (const res of resolutions) {
+      await convertStream(res);
     }
 
-    const filename = `video-${Date.now()}.mp4`;
-    const outputPath = path.join(PUBLIC_DIR, filename);
+    const master = m3u8s.map(item => `#EXT-X-STREAM-INF:BANDWIDTH=${parseInt(item.bandwidth)},RESOLUTION=${item.resolution}\n${item.path}`).join("\n");
+    const masterContent = `#EXTM3U\n${master}`;
+    fs.writeFileSync(path.join(outputDir, "master.m3u8"), masterContent);
 
-    ffmpeg(finalUrl)
-      .outputOptions("-c copy")
-      .on("end", () => {
-        console.log(`Finished: ${filename}`);
-        res.json({ url: `/download/${filename}` });
-        setTimeout(() => {
-          fs.unlink(outputPath, () => console.log(`Auto-deleted: ${filename}`));
-        }, 10 * 60 * 1000);
-      })
-      .on("error", (err) => {
-        console.error(err);
-        res.status(500).json({ error: "Conversion failed" });
-      })
-      .save(outputPath);
+    res.json({ url: `/hls-playback/${folderName}/master.m3u8` });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch or parse M3U8" });
+    res.status(500).json({ error: "Conversion failed" });
   }
 });
 
-app.get("/download/:filename", (req, res) => {
-  const filePath = path.join(PUBLIC_DIR, req.params.filename);
-  res.download(filePath, (err) => {
-    if (!err) {
-      fs.unlink(filePath, () => console.log(`Deleted after download: ${req.params.filename}`));
-    }
-  });
-});
-
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+      
